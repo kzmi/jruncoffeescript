@@ -139,8 +139,9 @@ public class Coffee {
 			return;
 		}
 
-		for (String file : sourceFiles) {
-			compile(file);
+		List<String> pathList = makePathList(sourceFiles);
+		for (String path : pathList) {
+			compile(path);
 		}
 	}
 
@@ -167,6 +168,35 @@ public class Coffee {
 		System.out.println(MessageFormat.format("ScriptEngine: {0} {1}",
 				engine.getFactory().getEngineName(),
 				engine.getFactory().getEngineVersion()));
+	}
+
+	private List<String> makePathList(List<String> args) {
+		List<String> pathList = new ArrayList<String>();
+		for (String arg : args) {
+			File f = new File(arg);
+			if (f.isDirectory()) {
+				searchSourceFiles(pathList, f);
+			} else {
+				pathList.add(arg);
+			}
+		}
+		return pathList;
+	}
+
+	private void searchSourceFiles(List<String> pathList, File dir) {
+		for (File f : dir.listFiles()) {
+			if (f.isDirectory()) {
+				searchSourceFiles(pathList, f);
+			} else {
+				String fileName = f.getName();
+				if (fileName.endsWith(".coffee")
+					|| fileName.endsWith(".litcoffee")
+					|| fileName.endsWith(".coffee.md")) {
+
+					pathList.add(f.getPath());
+				}
+			}
+		}
 	}
 
 	public void compile(String sourceFilePath) throws UnsupportedEncodingException, ScriptException, FileNotFoundException, IOException, URISyntaxException {
