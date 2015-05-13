@@ -31,11 +31,23 @@ import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.Path;
+import java.nio.file.StandardWatchEventKinds;
+import java.nio.file.WatchEvent;
+import java.nio.file.WatchKey;
+import java.nio.file.WatchService;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import javax.script.ScriptContext;
 import javax.script.ScriptEngine;
@@ -60,9 +72,13 @@ public class Coffee {
 	private String optOutputDir = null;
 	private boolean optVerbose = false;
 	private boolean optUpdate = false;
+	private boolean optWatch = false;
 
 	private ScriptEngine engine;
 	private final List<String> sourceFiles = new ArrayList<String>();
+
+	private ScheduledThreadPoolExecutor delayedCompileSchedule = null;
+	private Map<String, Object> delayedCompileTickets = null;
 
 	private static final String EXTENSION_JS = ".js";
 	private static final String EXTENSION_MAP = ".js.map";
@@ -116,6 +132,8 @@ public class Coffee {
 					optVerbose = true;
 				} else if ("--update".equals(subOpt)) {
 					optUpdate = true;
+				} else if ("--watch".equals(subOpt) || "w".equals(subOpt)) {
+					optWatch = true;
 				} else {
 					System.err.println(MessageFormat.format("Unknown option: {0}", subOpt));
 					System.exit(1);
@@ -143,6 +161,10 @@ public class Coffee {
 		for (String path : pathList) {
 			compile(path);
 		}
+
+		if (optWatch) {
+			watch(pathList);
+		}
 	}
 
 	private void showHelp() {
@@ -155,6 +177,7 @@ public class Coffee {
 		System.out.println("       --output [DIR] set the output directory for compiled JavaScript");
 		System.out.println("  -l   --literate     treat input as literate style coffee-script");
 		System.out.println("  -v   --version      display the version number");
+		System.out.println("  -w   --watch        watch scripts for changes and rerun commands");
 		System.out.println("       --verbose      output more informations to stdout");
 		System.out.println("       --update       compile only if the source file is newer than the js file");
 	}
@@ -190,13 +213,106 @@ public class Coffee {
 			} else {
 				String fileName = f.getName();
 				if (fileName.endsWith(".coffee")
-					|| fileName.endsWith(".litcoffee")
-					|| fileName.endsWith(".coffee.md")) {
+						|| fileName.endsWith(".litcoffee")
+						|| fileName.endsWith(".coffee.md")) {
 
 					pathList.add(f.getPath());
 				}
 			}
 		}
+	}
+
+	private void watch(List<String> pathList) throws IOException {
+		if (pathList.size() == 0) {
+			return;
+		}
+
+		Set<String> pathSet = new HashSet<String>();	// paths in absolute form
+		Set<String> dirs = new HashSet<String>();		// paths in absolute form
+		for (String path : pathList) {
+			File absPathFile = new File(path).getAbsoluteFile();
+			pathSet.add(absPathFile.getPath());
+			dirs.add(absPathFile.getParent());
+		}
+
+		FileSystem fs = FileSystems.getDefault();
+		WatchService ws = fs.newWatchService();
+		WatchEvent.Kind<?>[] eventKinds = {
+				StandardWatchEventKinds.ENTRY_MODIFY
+		};
+		for (String dir : dirs) {
+			Path pathObj = fs.getPath(dir);
+			pathObj.register(ws, eventKinds);
+		}
+
+		// Sometimes watch-event comes twice when a file was updated.
+		// We use delayed task to run compiler efficiently.
+		prepareDelayedCompile();
+
+		try {
+			for (;;) {
+				WatchKey key = ws.take();
+				Path pathWatching = (Path) key.watchable();
+				for (WatchEvent<?> watchEvent : key.pollEvents()) {
+					Path target = (Path) watchEvent.context();
+					String filePath = pathWatching.resolve(target).toString();
+					if (pathSet.contains(filePath)) {
+						scheduleCompile(filePath);
+					}
+				}
+				key.reset();
+			}
+		} catch (InterruptedException e) {
+			// ignore
+		}
+
+		shutdownDelayedCompile();
+	}
+
+	private void prepareDelayedCompile() {
+		delayedCompileSchedule = new ScheduledThreadPoolExecutor(1);
+		delayedCompileSchedule.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+
+		delayedCompileTickets = new ConcurrentHashMap<String, Object>();
+	}
+
+	private void shutdownDelayedCompile() {
+		if (delayedCompileSchedule != null) {
+			delayedCompileSchedule.shutdown();
+		}
+	}
+
+	private void scheduleCompile(final String filePath) {
+		final Object ticket = new Object();
+		delayedCompileTickets.put(filePath, ticket);
+		Runnable command = new Runnable() {
+			@Override
+			public void run() {
+				if (ticket != delayedCompileTickets.get(filePath)) {
+					// another command exists in the queue
+					return;
+				}
+
+				if (!new File(filePath).exists()) {
+					return;
+				}
+
+				try {
+					compile(filePath);
+				} catch (UnsupportedEncodingException e) {
+					e.printStackTrace();
+				} catch (ScriptException e) {
+					e.printStackTrace();
+				} catch (FileNotFoundException e) {
+					e.printStackTrace();
+				} catch (IOException e) {
+					e.printStackTrace();
+				} catch (URISyntaxException e) {
+					e.printStackTrace();
+				}
+			}
+		};
+		delayedCompileSchedule.schedule(command, 500, TimeUnit.MILLISECONDS);
 	}
 
 	public void compile(String sourceFilePath) throws UnsupportedEncodingException, ScriptException, FileNotFoundException, IOException, URISyntaxException {
