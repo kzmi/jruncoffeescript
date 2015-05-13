@@ -28,6 +28,7 @@ Usage: java jruncoffeescript.Coffee [options] [path/to/script.coffee ...]
        --output [DIR] set the output directory for compiled JavaScript
   -l   --literate     treat input as literate style coffee-script
   -v   --version      display the version number
+  -w   --watch        watch scripts for changes and rerun commands
        --verbose      output more informations to stdout
        --update       compile only if the source file is newer than the js file
 ```
@@ -44,6 +45,39 @@ Rhino engine doesn't fully support ECMAScript 5, and gets syntax error at the pr
 
 Run from Ant
 ------------
+
+It takes a while until the tool comes to ready to compile,
+so it would be better to specify multiple files at once.
+
+### Specify directories
+
+in build.xml
+
+```xml
+<property name="coffeescript.sourcedir1" value="/path/to/directory..."/>
+<property name="coffeescript.sourcedir2" value="/path/to/directory..."/>
+<property name="coffeescript.sourcedir3" value="/path/to/directory..."/>
+
+<target name="compile" description="Compiles coffeescript files">
+    <java
+        classname="jruncoffeescript.Coffee"
+        fork="true">
+        <!-- fork="true" is required for using ScriptEngine -->
+
+        <!-- need to specify class path -->
+
+        <arg value="-c"/>
+        <arg value="-m"/>
+        <arg value="--update"/>
+        <arg value="--verbose"/>
+        <arg path="${coffeescript.sourcedir1}"/>
+        <arg path="${coffeescript.sourcedir2}"/>
+        <arg path="${coffeescript.sourcedir3}"/>
+    </java>
+</target>
+```
+
+### Use FileSet
 
 in build.xml
 
@@ -71,10 +105,6 @@ in build.xml
     </java>
 </target>
 ```
-
-It takes a while until the tool becomes to ready to compile,
-so it would be better to specify multiple files at once.
-
 
 Note
 ----
