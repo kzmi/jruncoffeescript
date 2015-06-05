@@ -159,7 +159,10 @@ public class Coffee {
 
 		List<String> pathList = makePathList(sourceFiles);
 		for (String path : pathList) {
-			compile(path);
+			boolean succeeded = compile(path);
+			if (!succeeded && !optWatch) {
+				System.exit(1);
+			}
 		}
 
 		if (optWatch) {
@@ -315,7 +318,7 @@ public class Coffee {
 		delayedCompileSchedule.schedule(command, 500, TimeUnit.MILLISECONDS);
 	}
 
-	public void compile(String sourceFilePath) throws UnsupportedEncodingException, ScriptException, FileNotFoundException, IOException, URISyntaxException {
+	public boolean compile(String sourceFilePath) throws UnsupportedEncodingException, ScriptException, FileNotFoundException, IOException, URISyntaxException {
 		initEngine();
 
 		File sourceFile = new File(sourceFilePath).getAbsoluteFile();
@@ -324,7 +327,7 @@ public class Coffee {
 
 		if (optUpdate && !checkIfUpdated(sourceFile, jsFile)) {
 			verbose("skip (js file is up-to-date): {0}", sourceFile);
-			return;
+			return true;	// no error
 		}
 
 		verbose("compile: {0}", sourceFile);
@@ -349,7 +352,7 @@ public class Coffee {
 
 		if (csError != null) {
 			System.err.println(csError.toString());
-			System.exit(1);
+			return false;	// error
 		}
 
 		Object jsCompiled;
@@ -389,6 +392,8 @@ public class Coffee {
 			verbose("  --> save map file: {0}", mapFile);
 			save(mapFile, jsMap.toString());
 		}
+
+		return true;	// no error
 	}
 
 	private String readFile(File file) throws UnsupportedEncodingException, FileNotFoundException, IOException {
